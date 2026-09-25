@@ -104,7 +104,6 @@ def handle_text_message(message):
 
     if current_state == "waiting_for_gun_data":
         gun_data = message.text
-        # ذخیره اطلاعات در حافظه موقت برای استفاده‌های بعدی
         category = user_pending_data.get(user_id, {}).get("category", "نامشخص")
         user_pending_data[user_id] = {
             "data": gun_data,
@@ -280,7 +279,6 @@ def callback_query(call):
         except Exception as e:
             print(f"خطا در ارسال پیام به ادمین: {e}")
             
-        # ذخیره موقت اطلاعات کاربر در یک جای امن‌تر برای استفاده در زمان تایید ادمین
         user_pending_data[f"temp_data_{user_id}"] = {
             "user_id": user_id,
             "username": call.from_user.username or call.from_user.first_name,
@@ -343,7 +341,24 @@ def callback_query(call):
             
             bot.edit_message_text(text, chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=markup, parse_mode="Markdown")
 
+        # مرحله اول: پرسیدن تایید نهایی قبل از ارسال همگانی
         elif call.data == "admin_broadcast_start":
+            markup = InlineKeyboardMarkup(row_width=2)
+            markup.add(
+                InlineKeyboardButton("✅ بله، ارسال شود", callback_data="admin_broadcast_confirm"),
+                InlineKeyboardButton("❌ انصراف", callback_data="back_to_menu")
+            )
+            bot.edit_message_text(
+                "⚠️ **هشدار ارسال همگانی:**\n\n"
+                "آیا مطمئن هستید که می‌خواهید به تمام کاربرانی که تا کنون اتچمنت تاییدشده فرستاده‌اند، پیامِ اضافه شدن به اپلیکیشن را بفرستید؟",
+                chat_id=call.message.chat.id,
+                message_id=call.message.message_id,
+                reply_markup=markup,
+                parse_mode="Markdown"
+            )
+
+        # مرحله دوم: اجرای واقعی ارسال همگانی پس از تایید ادمین
+        elif call.data == "admin_broadcast_confirm":
             markup = InlineKeyboardMarkup()
             markup.add(InlineKeyboardButton("🔙 بازگشت به پنل", callback_data="back_to_menu"))
             
@@ -384,14 +399,12 @@ def callback_query(call):
         elif call.data.startswith("adm_accept_"):
             target_user_id = int(call.data.split("_")[2])
             
-            # استخراج اطلاعات اتچمنت از حافظه موقت و افزودن به آرشیو تاییدشده‌ها
             temp_key = f"temp_data_{target_user_id}"
             if temp_key in user_pending_data:
                 att_info = user_pending_data[temp_key]
                 if att_info not in saved_attachments:
                     saved_attachments.append(att_info)
             else:
-                # حالت پشتیبان اگر به هر دلیلی در موقت نبود
                 saved_attachments.append({
                     "user_id": target_user_id,
                     "username": "کاربر",
@@ -424,7 +437,7 @@ def callback_query(call):
                 call.message.text + "\n\n❌ **وضعیت: در انتظار نوشتن دلیل رد...**",
                 chat_id=call.message.chat.id,
                 message_id=call.message.message_id,
-                parse_Mode="Markdown"
+                parse_mode="Markdown"
             )
             bot.send_message(
                 ADMIN_CHAT_ID,
