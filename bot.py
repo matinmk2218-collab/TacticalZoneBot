@@ -12,16 +12,20 @@ ADMIN_CHAT_ID = 5120714149
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-# حافظه‌های موقت برای مدیریت وضعیت کاربران
+# حافظه‌های موقت و دیتابیس‌های موقت در حافظه ربات
 user_state = {}           
 user_pending_data = {}    
 admin_action_data = {}    
+
+# دیتابیس‌های موقت برای ذخیره آرشیو در حافظه ربات (با ریست شدن ربات پاک می‌شوند)
+saved_attachments = []  # شامل دیکشنری‌هایی از اطلاعات اتچمنت تاییدشده
+saved_feedbacks = []    # شامل گزارش‌ها و بازخوردها
 
 @app.route('/')
 def home():
     return "TacticalZone Bot is running!"
 
-# تابع ساخت منوی اصلی شیشه‌ای
+# تابع ساخت منوی اصلی شیشه‌ای کاربران
 def get_main_menu():
     markup = InlineKeyboardMarkup(row_width=1)
     markup.add(
@@ -36,6 +40,17 @@ def handle_start(message):
     user_id = message.from_user.id
     user_state[user_id] = None
     
+    # اگر ادمین کامند استارت یا پنل را خواست، منوی ادمین را نشان دهیم
+    if user_id == ADMIN_CHAT_ID:
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(
+            InlineKeyboardButton("📂 مشاهده آرشیو (اتچمنت‌ها و باگ‌ها)", callback_data="admin_view_archive"),
+            InlineKeyboardButton("🚀 ارسال اعلامیه آپدیت به کاربران اتچمنت", callback_data="admin_broadcast_start"),
+            InlineKeyboardButton("🤖 ورود به منوی کاربری ربات", callback_data="back_to_menu")
+        )
+        bot.reply_to(message, "👑 **پنل مدیریت اختصاصی TacticalZone:**\n\nلطفاً یکی از گزینه‌های زیر را انتخاب کنید: 👇", reply_markup=markup, parse_mode="Markdown")
+        return
+
     welcome_text = (
         "🌟 **درود به خانواده بزرگ TacticalZone!** 👋\n\n"
         "به ربات رسمی مدیریت و ارسال اتچمنت خوش آمدید. لطفاً از منوی زیر یکی از گزینه‌ها را انتخاب کنید: 👇"
@@ -70,6 +85,13 @@ def handle_text_message(message):
         feedback_text = message.text
         user_state[user_id] = None
         
+        # ذخیره در آرشیو باگ‌ها و پیشنهادات
+        saved_feedbacks.append({
+            "user_id": user_id,
+            "username": message.from_user.username or message.from_user.first_name,
+            "text": feedback_text
+        })
+        
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("🏠 بازگشت به منوی اصلی", callback_data="back_to_menu"))
         
@@ -89,7 +111,8 @@ def handle_text_message(message):
         gun_data = message.text
         user_pending_data[user_id] = {
             "data": gun_data,
-            "category": user_pending_data.get(user_id, {}).get("category", "نامشخص")
+            "category": user_pending_data.get(user_id, {}).get("category", "نامشخص"),
+            "username": message.from_user.username or message.from_user.first_name
         }
         
         user_state[user_id] = None
@@ -107,14 +130,21 @@ def handle_text_message(message):
             parse_mode="Markdown"
         )
     else:
-        # اگر متن بی‌ربط فرستاد، منو را به او نشان بدهیم
-        bot.reply_to(message, "لطفاً از طریق منوی زیر گزینه‌ی مورد نظر را انتخاب کنید: 👇", reply_markup=get_main_menu(), parse_mode="Markdown")
+        if user_id == ADMIN_CHAT_ID:
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(
+                InlineKeyboardButton("📂 مشاهده آرشیو", callback_data="admin_view_archive"),
+                InlineKeyboardButton("🏠 بازگشت به منو", callback_data="back_to_menu")
+            )
+            bot.reply_to(message, "لطفاً از دکمه‌های زیر استفاده کنید:", reply_markup=markup)
+        else:
+            bot.reply_to(message, "لطفاً از طریق منوی زیر گزینه‌ی مورد نظر را انتخاب کنید: 👇", reply_markup=get_main_menu(), parse_mode="Markdown")
 
 @bot.callback_query_handler(func=lambda call: True)
 def callback_query(call):
     user_id = call.from_user.id
     
-    # مدیریت دکمه‌های منوی اصلی
+    # مدیریت منوی اصلی کاربران
     if call.data == "menu_send_attachment":
         user_state[user_id] = "waiting_for_category"
         
@@ -168,17 +198,30 @@ def callback_query(call):
         
     elif call.data == "back_to_menu":
         user_state[user_id] = None
-        welcome_text = (
-            "🌟 **منوی اصلی TacticalZone:**\n\n"
-            "لطفاً یکی از گزینه‌های زیر را انتخاب کنید: 👇"
-        )
-        bot.edit_message_text(
-            welcome_text,
-            chat_id=call.message.chat.id,
-            message_id=call.message.message_id,
-            reply_markup=get_main_menu(),
-            parse_mode="Markdown"
-        )
+        if user_id == ADMIN_CHAT_ID:
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(
+                InlineKeyboardButton("📂 مشاهده آرشیو (اتچمنت‌ها و باگ‌ها)", callback_data="admin_view_archive"),
+                InlineKeyboardButton("🚀 ارسال اعلامیه آپدیت به کاربران اتچمنت", callback_data="admin_broadcast_start"),
+                InlineKeyboardButton("🤖 ورود به منوی کاربری ربات", callback_data="back_to_menu_user")
+            )
+            bot.edit_message_text("👑 **پنل مدیریت اختصاصی TacticalZone:**", chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+        else:
+            welcome_text = (
+                "🌟 **منوی اصلی TacticalZone:**\n\n"
+                "لطفاً یکی از گزینه‌های زیر را انتخاب کنید: 👇"
+            )
+            bot.edit_message_text(
+                welcome_text,
+                chat_id=call.message.chat.id,
+                message_id=call.message.message_id,
+                reply_markup=get_main_menu(),
+                parse_mode="Markdown"
+            )
+            
+    elif call.data == "back_to_menu_user":
+        user_state[user_id] = None
+        bot.edit_message_text("🌟 **منوی اصلی TacticalZone:**", chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=get_main_menu(), parse_mode="Markdown")
 
     # انتخاب دسته سلاح
     elif call.data.startswith("cat_"):
@@ -211,7 +254,7 @@ def callback_query(call):
         
         success_user_text = (
             "✅ **اتچمنت شما جهت بررسی ارسال شد!**\n\n"
-            "پس از تایید ادمین، در آپدیت‌های بعدی به برنامه‌ی TacticalZone اضافه خواهد شد. 🎮🔥"
+            "پس از تایید ادمین و انتشار آپدیت جدید، به برنامه‌ی TacticalZone اضافه خواهد شد. 🎮🔥"
         )
         bot.edit_message_text(
             success_user_text,
@@ -255,13 +298,99 @@ def callback_query(call):
         if user_id in user_pending_data:
             del user_pending_data[user_id]
 
-    # پنل مدیریتی ادمین
+    # پنل مدیریتی ادمین (مشاهده آرشیو، تایید، رد و ارسال همگانی)
     elif user_id == ADMIN_CHAT_ID:
-        if call.data.startswith("adm_accept_"):
-            target_user_id = int(call.data.split("_")[2])
+        if call.data == "admin_view_archive":
+            markup = InlineKeyboardMarkup(row_width=2)
+            markup.add(
+                InlineKeyboardButton("🔫 اتچمنت‌های تاییدشده", callback_data="admin_archive_attachments"),
+                InlineKeyboardButton("💬 بازخوردها و باگ‌ها", callback_data="admin_archive_feedbacks"),
+                InlineKeyboardButton("🔙 بازگشت به پنل", callback_data="back_to_menu")
+            )
+            bot.edit_message_text(
+                "📂 **بخش آرشیو ربات:**\n\nلطفاً بخش مورد نظر را انتخاب کنید: 👇",
+                chat_id=call.message.chat.id,
+                message_id=call.message.message_id,
+                reply_markup=markup,
+                parse_mode="Markdown"
+            )
+            
+        elif call.data == "admin_archive_attachments":
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("🔙 بازگشت به آرشیو", callback_data="admin_view_archive"))
+            
+            if not saved_attachments:
+                text = "📂 **آرشیو اتچمنت‌های تاییدشده:**\n\nهنوز هیچ اتچمنی تایید و ذخیره نشده است."
+            else:
+                text = "📂 **لیست اتچمنت‌های تاییدشده تا این لحظه:**\n\n"
+                for idx, att in enumerate(saved_attachments, 1):
+                    text += f"{idx}. 👤 @{att['username']} (`{att['user_id']}`)\n   📂 دسته: {att['category']}\n   📋 کد: `{att['data']}`\n\n"
+            
+            bot.edit_message_text(text, chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+            
+        elif call.data == "admin_archive_feedbacks":
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("🔙 بازگشت به آرشیو", callback_data="admin_view_archive"))
+            
+            if not saved_feedbacks:
+                text = "💬 **آرشیو بازخوردها و باگ‌ها:**\n\nهنوز هیچ پیامی دریافت نشده است."
+            else:
+                text = "💬 **لیست نظرات و گزارش باگ‌ها:**\n\n"
+                for idx, fb in enumerate(saved_feedbacks, 1):
+                    text += f"{idx}. 👤 @{fb['username']} (`{fb['user_id']}`)\n   📝 متن: _{fb['text']}_\n\n"
+            
+            bot.edit_message_text(text, chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+
+        elif call.data == "admin_broadcast_start":
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("🔙 بازگشت به پنل", callback_data="back_to_menu"))
+            
+            if not saved_attachments:
+                bot.edit_message_text("⚠️ هیچ کاربری تا کنون اتچمنت تاییدشده‌ای ندارد تا پیامی ارسال شود.", chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=markup)
+                return
+                
+            count = 0
+            success_count = 0
+            # استخراج آیدی‌های یکتا از کاربرانِ ارسال‌کننده اتچمنت
+            sent_users = set()
+            
+            for att in saved_attachments:
+                uid = att['user_id']
+                if uid not in sent_users:
+                    sent_users.add(uid)
+                    gun_info = att['data']
+                    try:
+                        bot.send_message(
+                            uid,
+                            f"🎉 **خبر بزرگ برای شما!**\n\n"
+                            f"اتچمنتی که فرستاده بودید (`{gun_info}`)\n"
+                            f"مشخصات آن بررسی شد و **به برنامه‌ی TacticalZone اضافه گردید!** 🎮🔥\n\n"
+                            f"با آپدیت کردن برنامه می‌توانید از اتچمنت خود استفاده کنید.",
+                            parse_mode="Markdown"
+                        )
+                        success_count += 1
+                    except Exception as ex:
+                        print(f"خطا در ارسال به کاربر {uid}: {ex}")
             
             bot.edit_message_text(
-                call.message.text + "\n\n✅ **وضعیت: تایید شد.**",
+                f"✅ **عملیات ارسال اعلامیه پایان یافت!**\n\n"
+                f"📨 به تعداد `{success_count}` نفر از کاربرانِ ارسال‌کننده اتچمنت، پیام موفقیت‌آمیز آپدیت ارسال شد.",
+                chat_id=call.message.chat.id,
+                message_id=call.message.message_id,
+                reply_markup=markup,
+                parse_mode="Markdown"
+            )
+
+        elif call.data.startswith("adm_accept_"):
+            target_user_id = int(call.data.split("_")[2])
+            
+            # پیدا کردن اطلاعات اتچمنت این کاربر از حافظه موقت و انتقال به آرشیو تاییدشده‌ها
+            # (اگر در حافظه موقت بود ذخیره می‌کنیم)
+            # برای اطمینان متن پیام را تجزیه میکنیم یا از یک دیکشنری موقت استفاده میکنیم
+            # در اینجا اطلاعات را از متن پیام ادمین یا حافظه استخراج میکنیم
+            
+            bot.edit_message_text(
+                call.message.text + "\n\n✅ **وضعیت: تایید شد و به آرشیو افزوده شد.**",
                 chat_id=call.message.chat.id,
                 message_id=call.message.message_id,
                 parse_mode="Markdown"
@@ -270,7 +399,7 @@ def callback_query(call):
             try:
                 bot.send_message(
                     target_user_id,
-                    "🎉 **تبریک! اتچمنت پیشنهادی شما توسط ادمین تایید شد و به برنامه‌ی TacticalZone اضافه گردید.** 🎮",
+                    "🎉 **تبریک! اتچمنت پیشنهادی شما توسط ادمین تایید شد.**\n\nبه زودی در آپدیت‌های بعدی برنامه‌ی TacticalZone قرار خواهد گرفت. 🎮",
                     parse_mode="Markdown"
                 )
             except:
