@@ -17,9 +17,9 @@ user_state = {}
 user_pending_data = {}    
 admin_action_data = {}    
 
-# دیتابیس‌های موقت برای ذخیره آرشیو در حافظه ربات (با ریست شدن ربات پاک می‌شوند)
-saved_attachments = []  # شامل دیکشنری‌هایی از اطلاعات اتچمنت تاییدشده
-saved_feedbacks = []    # شامل گزارش‌ها و بازخوردها
+# دیتابیس‌های موقت برای آرشیو
+saved_attachments = []  
+saved_feedbacks = []    
 
 @app.route('/')
 def home():
@@ -40,7 +40,6 @@ def handle_start(message):
     user_id = message.from_user.id
     user_state[user_id] = None
     
-    # اگر ادمین کامند استارت یا پنل را خواست، منوی ادمین را نشان دهیم
     if user_id == ADMIN_CHAT_ID:
         markup = InlineKeyboardMarkup(row_width=1)
         markup.add(
@@ -62,7 +61,6 @@ def handle_text_message(message):
     user_id = message.from_user.id
     current_state = user_state.get(user_id)
     
-    # اگر ادمین در حال نوشتن دلیل رد کردن اتچمنت باشد
     if user_id == ADMIN_CHAT_ID and current_state == "waiting_for_rejection_reason":
         target_user_id = admin_action_data.get("target_user_id")
         reason = message.text
@@ -80,12 +78,10 @@ def handle_text_message(message):
         user_state[user_id] = None
         return
 
-    # اگر کاربر در حال ارسال بازخورد باشد
     if current_state == "waiting_for_feedback":
         feedback_text = message.text
         user_state[user_id] = None
         
-        # ذخیره در آرشیو باگ‌ها و پیشنهادات
         saved_feedbacks.append({
             "user_id": user_id,
             "username": message.from_user.username or message.from_user.first_name,
@@ -106,12 +102,13 @@ def handle_text_message(message):
         bot.send_message(ADMIN_CHAT_ID, admin_fb_msg, parse_mode="Markdown")
         return
 
-    # اگر کاربر در حال فرستادن اطلاعات اتچمنت باشد
     if current_state == "waiting_for_gun_data":
         gun_data = message.text
+        # ذخیره اطلاعات در حافظه موقت برای استفاده‌های بعدی
+        category = user_pending_data.get(user_id, {}).get("category", "نامشخص")
         user_pending_data[user_id] = {
             "data": gun_data,
-            "category": user_pending_data.get(user_id, {}).get("category", "نامشخص"),
+            "category": category,
             "username": message.from_user.username or message.from_user.first_name
         }
         
@@ -144,17 +141,18 @@ def handle_text_message(message):
 def callback_query(call):
     user_id = call.from_user.id
     
-    # مدیریت منوی اصلی کاربران
     if call.data == "menu_send_attachment":
         user_state[user_id] = "waiting_for_category"
         
         markup = InlineKeyboardMarkup(row_width=2)
         markup.add(
-            InlineKeyboardButton("🔫 اسالت رایفل (Assault)", callback_data="cat_Assault"),
-            InlineKeyboardButton("🎯 اسنایپر (Sniper)", callback_data="cat_Sniper"),
-            InlineKeyboardButton("💥 شاتگان (Shotgun)", callback_data="cat_Shotgun"),
-            InlineKeyboardButton("⚡ ساب‌ماشین‌گان (SMG)", callback_data="cat_SMG"),
-            InlineKeyboardButton("🎮 سایر موارد", callback_data="cat_Other"),
+            InlineKeyboardButton("Assualt Rifle", callback_data="cat_Assualt_Rifle"),
+            InlineKeyboardButton("SMG", callback_data="cat_SMG"),
+            InlineKeyboardButton("LMG", callback_data="cat_LMG"),
+            InlineKeyboardButton("Snipe", callback_data="cat_Snipe"),
+            InlineKeyboardButton("ShotGun", callback_data="cat_ShotGun"),
+            InlineKeyboardButton("Marksman", callback_data="cat_Marksman"),
+            InlineKeyboardButton("Pistol", callback_data="cat_Pistol"),
             InlineKeyboardButton("🔙 بازگشت به منو", callback_data="back_to_menu")
         )
         
@@ -223,9 +221,8 @@ def callback_query(call):
         user_state[user_id] = None
         bot.edit_message_text("🌟 **منوی اصلی TacticalZone:**", chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=get_main_menu(), parse_mode="Markdown")
 
-    # انتخاب دسته سلاح
     elif call.data.startswith("cat_"):
-        category = call.data.split("_")[1]
+        category = call.data.replace("cat_", "").replace("_", " ")
         if user_id not in user_pending_data:
             user_pending_data[user_id] = {}
         user_pending_data[user_id]["category"] = category
@@ -283,8 +280,13 @@ def callback_query(call):
         except Exception as e:
             print(f"خطا در ارسال پیام به ادمین: {e}")
             
-        if user_id in user_pending_data:
-            del user_pending_data[user_id]
+        # ذخیره موقت اطلاعات کاربر در یک جای امن‌تر برای استفاده در زمان تایید ادمین
+        user_pending_data[f"temp_data_{user_id}"] = {
+            "user_id": user_id,
+            "username": call.from_user.username or call.from_user.first_name,
+            "category": category,
+            "data": gun_data
+        }
             
     elif call.data == "cancel_send":
         user_state[user_id] = None
@@ -298,7 +300,7 @@ def callback_query(call):
         if user_id in user_pending_data:
             del user_pending_data[user_id]
 
-    # پنل مدیریتی ادمین (مشاهده آرشیو، تایید، رد و ارسال همگانی)
+    # پنل مدیریتی ادمین
     elif user_id == ADMIN_CHAT_ID:
         if call.data == "admin_view_archive":
             markup = InlineKeyboardMarkup(row_width=2)
@@ -349,9 +351,7 @@ def callback_query(call):
                 bot.edit_message_text("⚠️ هیچ کاربری تا کنون اتچمنت تاییدشده‌ای ندارد تا پیامی ارسال شود.", chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=markup)
                 return
                 
-            count = 0
             success_count = 0
-            # استخراج آیدی‌های یکتا از کاربرانِ ارسال‌کننده اتچمنت
             sent_users = set()
             
             for att in saved_attachments:
@@ -384,13 +384,23 @@ def callback_query(call):
         elif call.data.startswith("adm_accept_"):
             target_user_id = int(call.data.split("_")[2])
             
-            # پیدا کردن اطلاعات اتچمنت این کاربر از حافظه موقت و انتقال به آرشیو تاییدشده‌ها
-            # (اگر در حافظه موقت بود ذخیره می‌کنیم)
-            # برای اطمینان متن پیام را تجزیه میکنیم یا از یک دیکشنری موقت استفاده میکنیم
-            # در اینجا اطلاعات را از متن پیام ادمین یا حافظه استخراج میکنیم
+            # استخراج اطلاعات اتچمنت از حافظه موقت و افزودن به آرشیو تاییدشده‌ها
+            temp_key = f"temp_data_{target_user_id}"
+            if temp_key in user_pending_data:
+                att_info = user_pending_data[temp_key]
+                if att_info not in saved_attachments:
+                    saved_attachments.append(att_info)
+            else:
+                # حالت پشتیبان اگر به هر دلیلی در موقت نبود
+                saved_attachments.append({
+                    "user_id": target_user_id,
+                    "username": "کاربر",
+                    "category": "نامشخص",
+                    "data": "کد اتچمنت"
+                })
             
             bot.edit_message_text(
-                call.message.text + "\n\n✅ **وضعیت: تایید شد و به آرشیو افزوده شد.**",
+                call.message.text + "\n\n✅ **وضعیت: تایید شد و به آرشیو اضافه گردید.**",
                 chat_id=call.message.chat.id,
                 message_id=call.message.message_id,
                 parse_mode="Markdown"
@@ -414,7 +424,7 @@ def callback_query(call):
                 call.message.text + "\n\n❌ **وضعیت: در انتظار نوشتن دلیل رد...**",
                 chat_id=call.message.chat.id,
                 message_id=call.message.message_id,
-                parse_mode="Markdown"
+                parse_Mode="Markdown"
             )
             bot.send_message(
                 ADMIN_CHAT_ID,
